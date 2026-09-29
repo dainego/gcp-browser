@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCS Data Browser</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+    <header class="topbar">
+        <div>
+            <div class="brand">GCS Data Browser</div>
+            <div class="subtitle" id="bucketName">Cargando bucket...</div>
+        </div>
+
+        <div class="topbar-actions">
+            <input
+                id="globalSearch"
+                class="search-input"
+                type="search"
+                placeholder="Buscar objetos..."
+                autocomplete="off"
+            >
+
+            <div class="theme-switcher" aria-label="Tema">
+                <button class="theme-button" data-theme="light" title="Tema claro" aria-label="Tema claro">☀</button>
+                <button class="theme-button" data-theme="dark" title="Tema oscuro" aria-label="Tema oscuro">🌙</button>
+                <button class="theme-button" data-theme="premium" title="Tema premium" aria-label="Tema premium">🐂</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-layout">
+        <aside class="explorer-panel">
+            <div class="panel-header">
+                <span>Explorer</span>
+                <button id="homeButton" class="icon-button" title="Ir al inicio">⌂</button>
+            </div>
+
+            <div class="folder-search-wrapper">
+                <input
+                    id="folderSearch"
+                    class="folder-search"
+                    type="search"
+                    placeholder="Filtrar carpetas..."
+                    autocomplete="off"
+                >
+            </div>
+
+            <div id="tree" class="tree"></div>
+        </aside>
+
+        <section class="content-panel">
+            <div class="toolbar">
+                <div id="breadcrumb" class="breadcrumb"></div>
+
+                <div class="toolbar-actions">
+                    <button id="backButton" class="secondary-button">← Atrás</button>
+                    <select id="sortSelect" class="select-control">
+                        <option value="name">Nombre</option>
+                        <option value="size">Tamaño</option>
+                        <option value="modified">Modificado</option>
+                    </select>
+                    <button id="directionButton" class="secondary-button">↑</button>
+                </div>
+            </div>
+
+            <section class="files-section">
+                <div class="section-header">
+                    <div>
+                        <span class="section-title">Archivos</span>
+                        <span id="itemCount" class="muted"></span>
+                    </div>
+                    <span id="currentPath" class="path-label"></span>
+                </div>
+
+                <div id="filesTable" class="files-table"></div>
+            </section>
+
+            <section class="details-section">
+                <div class="section-header">
+                    <span class="section-title">Detalle</span>
+                    <span id="selectedObject" class="path-label">Ningún archivo seleccionado</span>
+                </div>
+
+                <div id="detailsEmpty" class="details-empty">
+                    Seleccioná un archivo para ver sus detalles.
+                </div>
+
+                <div id="detailsContent" class="details-content hidden">
+                    <div class="tabs">
+                        <button class="tab active" data-tab="metadata">Metadata</button>
+                        <button class="tab" data-tab="schema">Schema</button>
+                        <button class="tab" data-tab="stats">Estadísticas</button>
+                        <button class="tab" data-tab="preview">Preview</button>
+                    </div>
+
+                    <div id="tabMetadata" class="tab-content"></div>
+                    <div id="tabSchema" class="tab-content hidden"></div>
+                    <div id="tabStats" class="tab-content hidden"></div>
+                    <div id="tabPreview" class="tab-content hidden"></div>
+                </div>
+            </section>
+        </section>
+    </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
