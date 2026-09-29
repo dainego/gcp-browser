@@ -1,4 +1,8 @@
 const state = {
+    storageId: "",
+    storageLabel: "",
+    storages: [],
+    buckets: [],
     bucket: "",
     prefix: "",
     rootPrefix: "",
@@ -56,6 +60,14 @@ function applyTheme(theme) {
 }
 
 function bindEvents() {
+    document.getElementById("storageSelect").addEventListener("change", async (event) => {
+        await switchStorage(event.target.value);
+    });
+
+    document.getElementById("bucketSelect").addEventListener("change", async (event) => {
+        await switchBucket(event.target.value);
+    });
+
     document.getElementById("homeButton").addEventListener("click", async () => {
         state.history = [];
         await loadFolder("");
@@ -94,20 +106,131 @@ function bindEvents() {
 
 async function loadConfig() {
     const response = await fetch("/api/config");
+
     if (!response.ok) {
         throw new Error(`Error cargando configuración: HTTP ${response.status}`);
     }
 
     const data = await response.json();
+    state.storages = data.storages || [];
 
-    state.bucket = data.bucket || "";
+    if (!state.storages.length) {
+        throw new Error("No hay Storage configurados.");
+    }
+
+    const savedStorage = localStorage.getItem("gcs-browser-storage");
+    const storage =
+        state.storages.find(item => item.id === savedStorage) ||
+        state.storages[0];
+
+    state.storageId = storage.id;
+    state.storageLabel = storage.label;
+    state.buckets = storage.buckets || [];
+
+    const savedBucket = localStorage.getItem(
+        `gcs-browser-bucket:${state.storageId}`
+    );
+
+    state.bucket =
+        state.buckets.includes(savedBucket)
+            ? savedBucket
+            : state.buckets[0];
+
+    renderStorageSelector();
+    renderBucketSelector();
+    await loadBucketConfig();
+}
+
+function renderStorageSelector() {
+    const select = document.getElementById("storageSelect");
+
+    select.innerHTML = state.storages.map(storage => `
+        <option value="${escapeHtml(storage.id)}" ${storage.id === state.storageId ? "selected" : ""}>
+            ${escapeHtml(storage.label)}
+        </option>
+    `).join("");
+}
+
+function renderBucketSelector() {
+    const select = document.getElementById("bucketSelect");
+
+    select.innerHTML = state.buckets.map(bucket => `
+        <option value="${escapeHtml(bucket)}" ${bucket === state.bucket ? "selected" : ""}>
+            ${escapeHtml(bucket)}
+        </option>
+    `).join("");
+}
+
+async function loadBucketConfig() {
+    const params = new URLSearchParams({
+        storage_id: state.storageId,
+        bucket: state.bucket,
+    });
+
+    const response = await fetch(`/api/bucket-config?${params.toString()}`);
+
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || `Error cargando bucket: HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
     state.rootPrefix = data.root_prefix || "";
 
     document.getElementById("bucketName").textContent =
-        state.rootPrefix
-            ? `${state.bucket} / ${state.rootPrefix}`
-            : state.bucket;
+        `${state.storageLabel} · ${state.bucket}`;
+}
 
+async function switchStorage(storageId) {
+    const storage = state.storages.find(item => item.id === storageId);
+    if (!storage) return;
+
+    state.storageId = storage.id;
+    state.storageLabel = storage.label;
+    state.buckets = storage.buckets || [];
+
+    const savedBucket = localStorage.getItem(
+        `gcs-browser-bucket:${state.storageId}`
+    );
+
+    state.bucket =
+        state.buckets.includes(savedBucket)
+            ? savedBucket
+            : state.buckets[0];
+
+    localStorage.setItem("gcs-browser-storage", state.storageId);
+
+    resetTreeState();
+    state.history = [];
+    renderStorageSelector();
+    renderBucketSelector();
+
+    await loadBucketConfig();
+    await loadFolder("", false);
+}
+
+async function switchBucket(bucket) {
+    if (!state.buckets.includes(bucket)) return;
+
+    state.bucket = bucket;
+
+    localStorage.setItem(
+        `gcs-browser-bucket:${state.storageId}`,
+        state.bucket
+    );
+
+    resetTreeState();
+    state.history = [];
+    renderBucketSelector();
+
+    await loadBucketConfig();
+    await loadFolder("", false);
+}
+
+function resetTreeState() {
+    state.treeNodes = new Map();
+    state.treeLoaded = new Set();
+    state.treeExpanded = new Set();
     state.treeExpanded.add(normalizePrefix(state.rootPrefix));
 }
 
@@ -129,6 +252,8 @@ async function loadFolder(prefix = "", pushHistory = true) {
     }
 
     const params = new URLSearchParams({
+        storage_id: state.storageId,
+        bucket: state.bucket,
         prefix,
         sort: state.sort,
         direction: state.direction,
@@ -541,7 +666,7 @@ async function renderMetadata() {
     container.innerHTML = "Cargando...";
 
     const data = await fetchJson(
-        `/api/object?name=${encodeURIComponent(state.selected.name)}`
+        `/api/object?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&name=${encodeURIComponent(state.selected.name)}`
     );
 
     container.innerHTML = metadataTable(data);
@@ -553,7 +678,7 @@ async function renderSchema() {
 
     try {
         const data = await fetchJson(
-            `/api/schema?name=${encodeURIComponent(state.selected.name)}`
+            `/api/schema?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&name=${encodeURIComponent(state.selected.name)}`
         );
 
         container.innerHTML = `
@@ -583,7 +708,7 @@ async function renderStats() {
 
     try {
         const data = await fetchJson(
-            `/api/stats?name=${encodeURIComponent(state.selected.name)}`
+            `/api/stats?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&name=${encodeURIComponent(state.selected.name)}`
         );
 
         container.innerHTML = metadataTable(data);
@@ -598,7 +723,7 @@ async function renderPreview() {
 
     try {
         const data = await fetchJson(
-            `/api/preview?name=${encodeURIComponent(state.selected.name)}&limit=100`
+            `/api/preview?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&name=${encodeURIComponent(state.selected.name)}&limit=100`
         );
 
         if (!data.rows.length) {
@@ -641,7 +766,7 @@ async function globalSearch(query) {
     }
 
     const response = await fetch(
-        `/api/search?q=${encodeURIComponent(query)}&prefix=${encodeURIComponent(state.prefix)}`
+        `/api/search?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&q=${encodeURIComponent(query)}&prefix=${encodeURIComponent(state.prefix)}`
     );
 
     if (!response.ok) {

@@ -3,3 +3,4 @@ uvicorn[standard]
 google-cloud-storage
 pyarrow
 python-dotenv
+google-auth

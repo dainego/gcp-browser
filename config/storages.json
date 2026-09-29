@@ -1,0 +1,23 @@
+{
+  "prod": {
+    "label": "Producción",
+    "buckets": [
+      "tacticas-moviles-prod"
+    ],
+    "credentials": "credentials/tacticas-prod.json"
+  },
+  "dev": {
+    "label": "Desarrollo",
+    "buckets": [
+      "tacticas-moviles-dev"
+    ],
+    "credentials": "credentials/tacticas-dev.json"
+  },
+  "bj-prod": {
+    "label": "BJ Prod",
+    "buckets": [
+      "bj-acacia-prod-gcp-gcs-uest4-traficotemis"
+    ],
+    "credentials": "credentials/bj-prod.json"
+  }
+}

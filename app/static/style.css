@@ -544,6 +544,15 @@ button {
 }
 
 
+
+.storage-select {
+    width: 145px;
+}
+
+.bucket-select {
+    width: 220px;
+}
+
 /* Theme selector */
 .topbar-actions {
     display: flex;
@@ -628,6 +637,14 @@ button {
     }
 
     .search-input {
-        width: 190px;
+        width: 170px;
+    }
+
+    .storage-select {
+        width: 120px;
+    }
+
+    .bucket-select {
+        width: 160px;
     }
 }

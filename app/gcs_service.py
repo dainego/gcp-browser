@@ -1,255 +1,316 @@
+
+import json
 import os
 from pathlib import Path
 
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
+from google.auth import load_credentials_from_file
+from google.auth.transport.requests import Request
 from google.cloud import storage
 
 
 class GCSService:
     def __init__(self):
-        self.bucket_name = os.getenv("GCS_BUCKET_FILTER", "").strip()
-        if not self.bucket_name:
-            raise RuntimeError("GCS_BUCKET_FILTER is required")
+        self.max_preview_rows = int(os.getenv("MAX_PREVIEW_ROWS", "100"))
+        self.max_search_results = int(os.getenv("MAX_SEARCH_RESULTS", "200"))
+        self.storages = self._load_storages()
 
-        credentials_file = os.getenv(
-            "GOOGLE_APPLICATION_CREDENTIALS", ""
-        ).strip()
+        if not self.storages:
+            raise RuntimeError(
+                "config/storages.json is required. Configure at least one storage."
+            )
 
-        if credentials_file:
-            credentials_path = Path(credentials_file)
-            if not credentials_path.exists():
+        self.clients = {}
+        self.credentials = {}
+
+        for storage_id, config in self.storages.items():
+            self._initialize_storage(storage_id, config)
+
+    def _load_storages(self):
+        config_path = Path(__file__).resolve().parent.parent / "config" / "storages.json"
+
+        if not config_path.exists():
+            return {}
+
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Storage configuration contains invalid JSON: {exc}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise RuntimeError("config/storages.json must contain a JSON object")
+
+        result = {}
+
+        for storage_id, config in data.items():
+            if not isinstance(config, dict):
                 raise RuntimeError(
-                    f"Credentials file not found: {credentials_file}"
+                    f"Storage '{storage_id}' must be an object"
                 )
 
-            self.client = storage.Client.from_service_account_json(
-                credentials_file
+            buckets = config.get("buckets", [])
+            if isinstance(buckets, str):
+                buckets = [buckets]
+
+            buckets = [
+                str(bucket).strip()
+                for bucket in buckets
+                if str(bucket).strip()
+            ]
+
+            if not buckets:
+                raise RuntimeError(
+                    f"Storage '{storage_id}' must have at least one bucket"
+                )
+
+            result[str(storage_id)] = {
+                "label": str(config.get("label") or storage_id),
+                "buckets": buckets,
+                "credentials": str(config.get("credentials") or "").strip(),
+                "root_prefixes": config.get("root_prefixes") or {},
+            }
+
+        return result
+
+    def _initialize_storage(self, storage_id, config):
+        credentials_file = config["credentials"]
+
+        if credentials_file:
+            path = Path(credentials_file)
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parent.parent / path
+
+            if not path.exists():
+                raise RuntimeError(
+                    f"Credentials file not found for '{storage_id}': {credentials_file}"
+                )
+
+            credentials, _ = load_credentials_from_file(
+                str(path),
+                scopes=["https://www.googleapis.com/auth/devstorage.read_only"],
+            )
+
+            self.credentials[storage_id] = credentials
+            self.clients[storage_id] = storage.Client(
+                project=getattr(credentials, "project_id", None),
+                credentials=credentials,
             )
         else:
-            self.client = storage.Client()
+            self.clients[storage_id] = storage.Client()
 
-        # Used by PyArrow for remote Parquet access.
-        self.arrow_fs = pafs.GcsFileSystem()
+    def _storage(self, storage_id):
+        if storage_id not in self.storages:
+            raise ValueError(f"Unknown storage profile: {storage_id}")
+        return self.storages[storage_id]
 
-        self.root_prefix = os.getenv("GCS_ROOT_PREFIX", "").strip().strip("/")
-        if self.root_prefix:
-            self.root_prefix += "/"
+    def _allowed_bucket(self, storage_id, bucket):
+        config = self._storage(storage_id)
+        bucket = str(bucket or "").strip()
 
-        self.max_preview_rows = int(
-            os.getenv("MAX_PREVIEW_ROWS", "100")
+        if bucket not in config["buckets"]:
+            raise ValueError(
+                f"Bucket '{bucket}' is not allowed for storage '{storage_id}'"
+            )
+
+        return bucket
+
+    def _client(self, storage_id):
+        return self.clients[storage_id]
+
+    def _bucket(self, storage_id, bucket):
+        return self._client(storage_id).bucket(
+            self._allowed_bucket(storage_id, bucket)
         )
-        self.max_search_results = int(
-            os.getenv("MAX_SEARCH_RESULTS", "200")
-        )
 
-    def _get_bucket(self):
-        # Deliberately references the configured bucket directly.
-        # No storage.buckets.list permission is required.
-        return self.client.bucket(self.bucket_name)
+    def _root_prefix(self, storage_id, bucket):
+        config = self._storage(storage_id)
+        prefix = str(
+            (config.get("root_prefixes") or {}).get(bucket, "") or ""
+        ).strip().strip("/")
+        return f"{prefix}/" if prefix else ""
 
-    def _normalize_prefix(self, prefix):
+    def _normalize_prefix(self, storage_id, bucket, prefix):
+        root = self._root_prefix(storage_id, bucket)
         prefix = (prefix or "").strip().lstrip("/")
 
         if prefix and not prefix.endswith("/"):
             prefix += "/"
 
-        if self.root_prefix:
-            if prefix and not prefix.startswith(self.root_prefix):
-                prefix = self.root_prefix + prefix
+        if root:
+            if prefix and not prefix.startswith(root):
+                prefix = root + prefix
             elif not prefix:
-                prefix = self.root_prefix
+                prefix = root
 
         return prefix
 
-    def _validate_name(self, name):
+    def _validate_name(self, storage_id, bucket, name):
+        self._allowed_bucket(storage_id, bucket)
         name = (name or "").strip().lstrip("/")
 
         if not name:
             raise ValueError("Object name is required")
 
-        if self.root_prefix and not name.startswith(self.root_prefix):
+        root = self._root_prefix(storage_id, bucket)
+        if root and not name.startswith(root):
             raise ValueError("Object outside configured root prefix")
 
         return name
 
     def _relative_name(self, name, prefix):
-        if name.startswith(prefix):
-            return name[len(prefix):]
-        return name
+        return name[len(prefix):] if name.startswith(prefix) else name
 
-    def _parent_prefix(self, prefix):
+    def _parent_prefix(self, storage_id, bucket, prefix):
         prefix = (prefix or "").rstrip("/")
+        root = self._root_prefix(storage_id, bucket)
 
         if not prefix:
             return ""
-
-        if self.root_prefix and prefix == self.root_prefix.rstrip("/"):
+        if root and prefix == root.rstrip("/"):
             return ""
 
         parent = prefix.rsplit("/", 1)[0] if "/" in prefix else ""
-
         if parent and not parent.endswith("/"):
             parent += "/"
 
-        if self.root_prefix:
-            root = self.root_prefix.rstrip("/")
-            if parent and not parent.startswith(root):
-                return self.root_prefix
-            if parent == root:
-                return self.root_prefix
+        if root:
+            root_clean = root.rstrip("/")
+            if parent and not parent.startswith(root_clean):
+                return root
+            if parent == root_clean:
+                return root
 
         return parent
 
     def config(self):
         return {
-            "bucket": self.bucket_name,
-            "root_prefix": self.root_prefix,
+            "storages": [
+                {
+                    "id": storage_id,
+                    "label": config["label"],
+                    "buckets": config["buckets"],
+                }
+                for storage_id, config in self.storages.items()
+            ],
             "max_preview_rows": self.max_preview_rows,
         }
 
-    def list_objects(self, prefix="", sort="name", direction="asc"):
-        """
-        List the immediate folders and files under prefix.
+    def bucket_config(self, storage_id, bucket):
+        bucket = self._allowed_bucket(storage_id, bucket)
+        return {
+            "storage_id": storage_id,
+            "bucket": bucket,
+            "root_prefix": self._root_prefix(storage_id, bucket),
+        }
 
-        Important:
-        We intentionally do NOT use delimiter="/".
+    def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc"):
+        bucket = self._allowed_bucket(storage_id, bucket)
+        prefix = self._normalize_prefix(storage_id, bucket, prefix)
 
-        Some GCS iterator behaviors around prefixes can make it easy to
-        consume the iterator before prefixes are inspected. Instead, we
-        retrieve object names and derive the immediate child folders
-        ourselves. This also gives the frontend a deterministic tree.
-        """
-        prefix = self._normalize_prefix(prefix)
-
-        # Materialize the iterator once. This avoids depending on the
-        # iterator's internal prefixes state.
         blobs = list(
-            self.client.list_blobs(
-                self._get_bucket(),
-                prefix=prefix,
+            self._client(storage_id).list_blobs(
+                self._bucket(storage_id, bucket), prefix=prefix
             )
         )
 
-        folders_map = {}
+        folders = {}
         objects = []
 
         for blob in blobs:
-            name = blob.name
-
-            # Ignore the synthetic folder marker itself.
-            if name == prefix:
+            if blob.name == prefix:
                 continue
 
-            relative = self._relative_name(name, prefix)
+            relative = self._relative_name(blob.name, prefix)
 
-            # A child containing "/" belongs to a subfolder.
             if "/" in relative:
-                child_folder = relative.split("/", 1)[0]
-                folder_name = f"{prefix}{child_folder}/"
-
-                folders_map[folder_name] = {
+                child = relative.split("/", 1)[0]
+                folder_name = f"{prefix}{child}/"
+                folders[folder_name] = {
                     "name": folder_name.rstrip("/"),
-                    "relative_name": child_folder,
+                    "relative_name": child,
                     "is_folder": True,
                     "size": None,
                     "updated": None,
                     "content_type": None,
                     "storage_class": None,
                 }
-                continue
-
-            objects.append({
-                "name": name,
-                "relative_name": relative,
-                "size": blob.size or 0,
-                "updated": (
-                    blob.updated.isoformat()
-                    if blob.updated
-                    else None
-                ),
-                "content_type": blob.content_type,
-                "storage_class": blob.storage_class,
-                "is_folder": False,
-            })
+            else:
+                objects.append({
+                    "name": blob.name,
+                    "relative_name": relative,
+                    "size": blob.size or 0,
+                    "updated": blob.updated.isoformat() if blob.updated else None,
+                    "content_type": blob.content_type,
+                    "storage_class": blob.storage_class,
+                    "is_folder": False,
+                })
 
         folders_data = sorted(
-            folders_map.values(),
-            key=lambda x: x["relative_name"].lower(),
+            folders.values(), key=lambda x: x["relative_name"].lower()
         )
 
         key_map = {
             "name": lambda x: x["relative_name"].lower(),
-            "size": lambda x: (
-                x["size"] if x["size"] is not None else -1
-            ),
+            "size": lambda x: x["size"] if x["size"] is not None else -1,
             "modified": lambda x: x["updated"] or "",
         }
 
-        key = key_map.get(sort, key_map["name"])
-        reverse = direction.lower() == "desc"
-
         items = folders_data + objects
-        items.sort(key=key, reverse=reverse)
+        items.sort(
+            key=key_map.get(sort, key_map["name"]),
+            reverse=direction.lower() == "desc",
+        )
 
         return {
-            "bucket": self.bucket_name,
+            "storage_id": storage_id,
+            "bucket": bucket,
             "prefix": prefix,
-            "parent_prefix": self._parent_prefix(prefix),
+            "parent_prefix": self._parent_prefix(storage_id, bucket, prefix),
             "folders": folders_data,
             "objects": objects,
             "items": items,
             "count": len(items),
         }
 
-    def search(self, q, prefix=""):
+    def search(self, storage_id, bucket, q, prefix=""):
+        bucket = self._allowed_bucket(storage_id, bucket)
         q = (q or "").strip().lower()
-        prefix = self._normalize_prefix(prefix)
-
-        if not q:
-            return {
-                "query": q,
-                "prefix": prefix,
-                "results": [],
-                "count": 0,
-            }
-
+        prefix = self._normalize_prefix(storage_id, bucket, prefix)
         results = []
 
-        for blob in self.client.list_blobs(
-            self._get_bucket(),
-            prefix=prefix,
-        ):
-            if q in blob.name.lower():
-                results.append({
-                    "name": blob.name,
-                    "relative_name": self._relative_name(
-                        blob.name, prefix
-                    ),
-                    "size": blob.size or 0,
-                    "updated": (
-                        blob.updated.isoformat()
-                        if blob.updated
-                        else None
-                    ),
-                    "content_type": blob.content_type,
-                    "storage_class": blob.storage_class,
-                    "is_folder": False,
-                })
+        if q:
+            for blob in self._client(storage_id).list_blobs(
+                self._bucket(storage_id, bucket), prefix=prefix
+            ):
+                if q in blob.name.lower():
+                    results.append({
+                        "name": blob.name,
+                        "relative_name": self._relative_name(blob.name, prefix),
+                        "size": blob.size or 0,
+                        "updated": blob.updated.isoformat() if blob.updated else None,
+                        "content_type": blob.content_type,
+                        "storage_class": blob.storage_class,
+                        "is_folder": False,
+                    })
 
-            if len(results) >= self.max_search_results:
-                break
+                if len(results) >= self.max_search_results:
+                    break
 
         return {
             "query": q,
+            "storage_id": storage_id,
+            "bucket": bucket,
             "prefix": prefix,
             "results": results,
             "count": len(results),
         }
 
-    def object_metadata(self, name):
-        name = self._validate_name(name)
-        blob = self._get_bucket().blob(name)
+    def object_metadata(self, storage_id, bucket, name):
+        name = self._validate_name(storage_id, bucket, name)
+        blob = self._bucket(storage_id, bucket).blob(name)
 
         if not blob.exists():
             raise FileNotFoundError(f"Object not found: {name}")
@@ -258,20 +319,13 @@ class GCSService:
 
         return {
             "name": blob.name,
-            "bucket": self.bucket_name,
+            "bucket": bucket,
+            "storage_id": storage_id,
             "size": blob.size or 0,
             "content_type": blob.content_type,
             "storage_class": blob.storage_class,
-            "created": (
-                blob.time_created.isoformat()
-                if blob.time_created
-                else None
-            ),
-            "updated": (
-                blob.updated.isoformat()
-                if blob.updated
-                else None
-            ),
+            "created": blob.time_created.isoformat() if blob.time_created else None,
+            "updated": blob.updated.isoformat() if blob.updated else None,
             "etag": blob.etag,
             "md5_hash": blob.md5_hash,
             "crc32c": blob.crc32c,
@@ -279,19 +333,30 @@ class GCSService:
             "metageneration": blob.metageneration,
         }
 
-    def _parquet_file(self, object_name):
+    def _arrow_fs(self, storage_id):
+        credentials = self.credentials.get(storage_id)
+
+        if credentials is None:
+            return pafs.GcsFileSystem()
+
+        if not credentials.valid:
+            credentials.refresh(Request())
+
+        return pafs.GcsFileSystem(access_token=credentials.token)
+
+    def _parquet_file(self, storage_id, bucket, name):
         return pq.ParquetFile(
-            f"{self.bucket_name}/{object_name}",
-            filesystem=self.arrow_fs,
+            f"{bucket}/{name}",
+            filesystem=self._arrow_fs(storage_id),
         )
 
-    def schema(self, name):
-        name = self._validate_name(name)
+    def schema(self, storage_id, bucket, name):
+        name = self._validate_name(storage_id, bucket, name)
 
         if not name.lower().endswith(".parquet"):
             raise ValueError("Schema is currently supported for Parquet files only")
 
-        parquet = self._parquet_file(name)
+        parquet = self._parquet_file(storage_id, bucket, name)
 
         return {
             "format": "parquet",
@@ -309,14 +374,13 @@ class GCSService:
             ],
         }
 
-    def stats(self, name):
-        name = self._validate_name(name)
+    def stats(self, storage_id, bucket, name):
+        name = self._validate_name(storage_id, bucket, name)
 
         if not name.lower().endswith(".parquet"):
             raise ValueError("Statistics are currently supported for Parquet files only")
 
-        parquet = self._parquet_file(name)
-        metadata = parquet.metadata
+        metadata = self._parquet_file(storage_id, bucket, name).metadata
 
         return {
             "format": "parquet",
@@ -327,8 +391,14 @@ class GCSService:
             "serialized_size": metadata.serialized_size,
         }
 
-    def _preview_parquet(self, name, limit):
-        parquet = self._parquet_file(name)
+    def preview(self, storage_id, bucket, name, limit=100):
+        name = self._validate_name(storage_id, bucket, name)
+        limit = min(max(int(limit), 1), self.max_preview_rows)
+
+        if not name.lower().endswith(".parquet"):
+            raise ValueError("Preview is currently supported for Parquet files only")
+
+        parquet = self._parquet_file(storage_id, bucket, name)
 
         if parquet.metadata.num_row_groups == 0:
             return {
@@ -339,8 +409,7 @@ class GCSService:
                 "note": "Parquet file has no row groups.",
             }
 
-        table = parquet.read_row_group(0)
-        table = table.slice(0, limit)
+        table = parquet.read_row_group(0).slice(0, limit)
 
         return {
             "format": "parquet",
@@ -350,16 +419,20 @@ class GCSService:
             "note": "Preview reads the first Parquet row group only.",
         }
 
-    def preview(self, name, limit=100):
-        name = self._validate_name(name)
-        limit = min(
-            max(int(limit), 1),
-            self.max_preview_rows,
-        )
+    def test_gcs(self, storage_id, bucket):
+        bucket = self._allowed_bucket(storage_id, bucket)
+        result = []
 
-        if name.lower().endswith(".parquet"):
-            return self._preview_parquet(name, limit)
+        for blob in self._client(storage_id).list_blobs(
+            self._bucket(storage_id, bucket)
+        ):
+            result.append({"name": blob.name, "size": blob.size or 0})
+            if len(result) >= 10:
+                break
 
-        raise ValueError(
-            "Preview is currently supported for Parquet files only"
-        )
+        return {
+            "storage_id": storage_id,
+            "bucket": bucket,
+            "objects_found": len(result),
+            "objects": result,
+        }

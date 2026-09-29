@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 from fastapi import FastAPI, Query, HTTPException
@@ -6,10 +7,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .gcs_service import GCSService
 
-app = FastAPI(title="GCS Data Browser", version="0.5")
-
+app = FastAPI(title="GCS Data Browser", version="0.6")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
 gcs = GCSService()
 
 
@@ -28,67 +27,67 @@ def config():
     return gcs.config()
 
 
+@app.get("/api/bucket-config")
+def bucket_config(storage_id: str, bucket: str):
+    try:
+        return gcs.bucket_config(storage_id, bucket)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.get("/api/objects")
-def objects(
-    prefix: str = "",
-    sort: str = Query("name"),
-    direction: str = Query("asc"),
-):
-    return gcs.list_objects(prefix=prefix, sort=sort, direction=direction)
+def objects(storage_id: str, bucket: str, prefix: str = "",
+            sort: str = Query("name"), direction: str = Query("asc")):
+    try:
+        return gcs.list_objects(storage_id, bucket, prefix, sort, direction)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/search")
-def search(q: str, prefix: str = ""):
-    return gcs.search(q=q, prefix=prefix)
+def search(storage_id: str, bucket: str, q: str, prefix: str = ""):
+    try:
+        return gcs.search(storage_id, bucket, q, prefix)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/object")
-def object_metadata(name: str):
+def object_metadata(storage_id: str, bucket: str, name: str):
     try:
-        return gcs.object_metadata(name)
+        return gcs.object_metadata(storage_id, bucket, name)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.get("/api/schema")
-def schema(name: str):
+def schema(storage_id: str, bucket: str, name: str):
     try:
-        return gcs.schema(name)
+        return gcs.schema(storage_id, bucket, name)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/stats")
-def stats(name: str):
+def stats(storage_id: str, bucket: str, name: str):
     try:
-        return gcs.stats(name)
+        return gcs.stats(storage_id, bucket, name)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/preview")
-def preview(name: str, limit: int = Query(100, ge=1, le=1000)):
+def preview(storage_id: str, bucket: str, name: str,
+            limit: int = Query(100, ge=1, le=1000)):
     try:
-        return gcs.preview(name, limit=limit)
+        return gcs.preview(storage_id, bucket, name, limit)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/test-gcs")
-def test_gcs():
-    """Simple diagnostic endpoint; useful for validating bucket access."""
-    result = []
-
-    for blob in gcs.client.list_blobs(gcs.bucket_name):
-        result.append({
-            "name": blob.name,
-            "size": blob.size or 0,
-        })
-        if len(result) >= 10:
-            break
-
-    return {
-        "bucket": gcs.bucket_name,
-        "objects_found": len(result),
-        "objects": result,
-    }
+def test_gcs(storage_id: str, bucket: str):
+    try:
+        return gcs.test_gcs(storage_id, bucket)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
