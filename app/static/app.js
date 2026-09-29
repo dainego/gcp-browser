@@ -154,11 +154,15 @@ function renderStorageSelector() {
 function renderBucketSelector() {
     const select = document.getElementById("bucketSelect");
 
-    select.innerHTML = state.buckets.map(bucket => `
+    const options = state.buckets.map(bucket => `
         <option value="${escapeHtml(bucket)}" ${bucket === state.bucket ? "selected" : ""}>
             ${escapeHtml(bucket)}
         </option>
     `).join("");
+
+    select.innerHTML = options;
+
+
 }
 
 async function loadBucketConfig() {

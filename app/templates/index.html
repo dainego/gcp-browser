@@ -15,8 +15,6 @@
         </div>
 
         <div class="topbar-actions">
-            <select id="storageSelect" class="select-control storage-select" title="Storage"></select>
-            <select id="bucketSelect" class="select-control bucket-select" title="Bucket"></select>
             <input
                 id="globalSearch"
                 class="search-input"
@@ -38,6 +36,16 @@
             <div class="panel-header">
                 <span>Explorer</span>
                 <button id="homeButton" class="icon-button" title="Ir al inicio">⌂</button>
+            </div>
+
+            <div class="explorer-storage-wrapper">
+                <label for="storageSelect">Storage</label>
+                <select id="storageSelect" class="select-control explorer-storage-select" title="Cambiar Storage"></select>
+            </div>
+
+            <div class="explorer-bucket-wrapper">
+                <label for="bucketSelect">Bucket</label>
+                <select id="bucketSelect" class="select-control explorer-bucket-select" title="Cambiar bucket"></select>
             </div>
 
             <div class="folder-search-wrapper">
