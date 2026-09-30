@@ -378,10 +378,21 @@ class GCSService:
         if credentials is None:
             return pafs.GcsFileSystem()
 
-        if not credentials.valid:
+        # PyArrow requires access_token and credential_token_expiration
+        # to be provided together when using an explicit OAuth token.
+        if not credentials.valid or credentials.expiry is None:
             credentials.refresh(Request())
 
-        return pafs.GcsFileSystem(access_token=credentials.token)
+        if not credentials.token or credentials.expiry is None:
+            raise RuntimeError(
+                f"No se pudo obtener un access token válido para storage '{storage_id}'."
+            )
+
+        return pafs.GcsFileSystem(
+            access_token=credentials.token,
+            credential_token_expiration=credentials.expiry,
+            project_id=getattr(credentials, "project_id", None),
+        )
 
     def _parquet_file(self, storage_id, bucket, name):
         return pq.ParquetFile(

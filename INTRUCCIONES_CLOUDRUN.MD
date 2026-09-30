@@ -77,11 +77,16 @@ gcloud projects add-iam-policy-binding big-data-movistar `
 
 
 # Deploy
-.\deploy\cloudrun\deploy-cloudrun.ps1
-  * Cloud Build construye ambas imágenes
-  * Artifact Registry las almacena
-  * Despliega un único servicio público de Cloud Run.
-  * Muestra la URL pública HTTPS al terminar.
+.\deploy\cloudrun\deploy-cloud-run.ps1 `
+  -ProjectId $project_id `
+  -Region us-east4 `
+  -RuntimeServiceAccount "gcpbrowser-cloudrun@$project_id.iam.gserviceaccount.com"
+
+# Habilitar acceso público
+gcloud run services add-iam-policy-binding gcs-data-browser `
+  --region us-east4 `
+  --member="allUsers" `
+  --role="roles/run.invoker"
 
 # Para confirmar la nueva versión
 .\deploy\cloudrun\deploy-cloud-run.ps1 `
@@ -96,3 +101,4 @@ gcloud run services describe gcs-data-browser `
   --format="value(status.url)"
 
   URL Ejemplo: URL: https://gcs-data-browser-z7enknj5za-uk.a.run.app
+

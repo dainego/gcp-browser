@@ -12,4 +12,4 @@ credentials/
 .github/
 
 # Local deployment helpers
-deploy/cloudrun/service.rendered.yaml
+deploy/
