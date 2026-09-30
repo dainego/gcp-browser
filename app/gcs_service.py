@@ -6,6 +6,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from pyarrow import fs as pafs
 from google.auth import load_credentials_from_file
+from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
@@ -70,12 +71,50 @@ class GCSService:
                 "label": str(config.get("label") or storage_id),
                 "buckets": buckets,
                 "credentials": str(config.get("credentials") or "").strip(),
+                "secret": str(config.get("secret") or "").strip(),
+                "secret_env": str(config.get("secret_env") or "").strip(),
                 "root_prefixes": config.get("root_prefixes") or {},
             }
 
         return result
 
     def _initialize_storage(self, storage_id, config):
+        scopes = ["https://www.googleapis.com/auth/devstorage.read_only"]
+        secret_env = config.get("secret_env", "")
+        secret_value = os.getenv(secret_env) if secret_env else None
+
+        # Cloud Run: Secret Manager injects the Service Account JSON as an env var.
+        if secret_value:
+            try:
+                service_account_info = json.loads(secret_value)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"Secret environment variable '{secret_env}' for '{storage_id}' contains invalid JSON: {exc}"
+                ) from exc
+
+            if not isinstance(service_account_info, dict):
+                raise RuntimeError(
+                    f"Secret environment variable '{secret_env}' for '{storage_id}' must contain a JSON object."
+                )
+
+            try:
+                credentials = service_account.Credentials.from_service_account_info(
+                    service_account_info,
+                    scopes=scopes,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not load Service Account credentials from secret for '{storage_id}': {exc}"
+                ) from exc
+
+            self.credentials[storage_id] = credentials
+            self.clients[storage_id] = storage.Client(
+                project=getattr(credentials, "project_id", None),
+                credentials=credentials,
+            )
+            return
+
+        # Local: keep using the JSON file under credentials/.
         credentials_file = config["credentials"]
 
         if credentials_file:
@@ -90,7 +129,7 @@ class GCSService:
 
             credentials, _ = load_credentials_from_file(
                 str(path),
-                scopes=["https://www.googleapis.com/auth/devstorage.read_only"],
+                scopes=scopes,
             )
 
             self.credentials[storage_id] = credentials

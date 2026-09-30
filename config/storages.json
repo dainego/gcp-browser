@@ -4,20 +4,26 @@
     "buckets": [
       "tacticas-moviles-prod"
     ],
-    "credentials": "credentials/tacticas-prod.json"
+    "credentials": "credentials/tacticas-prod.json",
+    "secret": "tacticas-prod",
+    "secret_env": "GCS_SECRET_TACTICAS_PROD"
   },
   "tacticas-dev": {
     "label": "Tacticas Desarrollo",
     "buckets": [
       "tacticas-moviles-dev"
     ],
-    "credentials": "credentials/tacticas-dev.json"
+    "credentials": "credentials/tacticas-dev.json",
+    "secret": "tacticas-dev",
+    "secret_env": "GCS_SECRET_TACTICAS_DEV"
   },
-   "bj-prod": {
+  "bj-prod": {
     "label": "BJ Producción",
     "buckets": [
       "bj-acacia-prod-gcp-gcs-uest4-traficotemis"
     ],
-    "credentials": "credentials/bj-prod.json"
+    "credentials": "credentials/bj-prod.json",
+    "secret": "bj-prod",
+    "secret_env": "GCS_SECRET_BJ_PROD"
   }
 }

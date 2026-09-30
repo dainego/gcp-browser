@@ -1,0 +1,15 @@
+# Local Python/runtime files
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# Private credentials must never be uploaded as source
+credentials/
+
+# Git metadata
+.git/
+.github/
+
+# Local deployment helpers
+deploy/cloudrun/service.rendered.yaml
