@@ -245,36 +245,37 @@ class GCSService:
             "root_prefix": self._root_prefix(storage_id, bucket),
         }
 
-    def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc"):
-        """List only the immediate children of the requested GCS prefix.
+    def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc", page=1, page_size=500):
+        """Return a page of the immediate children of a folder.
 
-        The delimiter is critical: without it, Cloud Storage returns every object
-        recursively below the prefix, which can consume large amounts of memory
-        for buckets with deep or large directory-like structures.
+        The delimiter keeps the query scoped to immediate children. We build a
+        single, consistently sorted list of those children before slicing it;
+        this is important because a GCS API page counts blobs, while folders
+        are returned separately as iterator prefixes. Counting only GCS pages
+        caused the UI's page controls to appear not to work.
         """
         bucket = self._allowed_bucket(storage_id, bucket)
         prefix = self._normalize_prefix(storage_id, bucket, prefix)
+        page = max(1, int(page or 1))
+        page_size = min(500, max(1, int(page_size or 500)))
 
         iterator = self._client(storage_id).list_blobs(
             self._bucket(storage_id, bucket),
             prefix=prefix,
             delimiter="/",
-            page_size=1000,
         )
 
-        folders = {}
-        objects = []
+        # With delimiter="/", this collects only blobs directly inside this
+        # folder. Nested objects are represented by iterator.prefixes.
+        blobs = list(iterator)
+        selected_items = []
 
-        # Iterate page by page. The delimiter causes GCS to return only direct
-        # objects plus child prefixes, instead of traversing all descendants.
-        for page in iterator.pages:
-            for child_prefix in (iterator.prefixes or set()):
-                if child_prefix == prefix:
-                    continue
-                relative = self._relative_name(child_prefix.rstrip("/"), prefix)
-                if not relative:
-                    continue
-                folders[child_prefix] = {
+        for child_prefix in sorted(iterator.prefixes or set()):
+            if child_prefix == prefix:
+                continue
+            relative = self._relative_name(child_prefix.rstrip("/"), prefix)
+            if relative:
+                selected_items.append({
                     "name": child_prefix.rstrip("/"),
                     "relative_name": relative,
                     "is_folder": True,
@@ -282,41 +283,41 @@ class GCSService:
                     "updated": None,
                     "content_type": None,
                     "storage_class": None,
-                }
-
-            for blob in page:
-                if blob.name == prefix:
-                    continue
-                relative = self._relative_name(blob.name, prefix)
-                # Defensive guard: delimiter listing should only return direct
-                # children, but do not expose descendants if GCS returns one.
-                if "/" in relative:
-                    continue
-                objects.append({
-                    "name": blob.name,
-                    "relative_name": relative,
-                    "size": blob.size or 0,
-                    "updated": blob.updated.isoformat() if blob.updated else None,
-                    "content_type": blob.content_type,
-                    "storage_class": blob.storage_class,
-                    "is_folder": False,
                 })
 
-        folders_data = sorted(
-            folders.values(), key=lambda x: x["relative_name"].lower()
-        )
+        for blob in blobs:
+            if blob.name == prefix:
+                continue
+            relative = self._relative_name(blob.name, prefix)
+            if not relative or "/" in relative:
+                continue
+            selected_items.append({
+                "name": blob.name,
+                "relative_name": relative,
+                "size": blob.size or 0,
+                "updated": blob.updated.isoformat() if blob.updated else None,
+                "content_type": blob.content_type,
+                "storage_class": blob.storage_class,
+                "is_folder": False,
+            })
 
         key_map = {
             "name": lambda x: x["relative_name"].lower(),
             "size": lambda x: x["size"] if x["size"] is not None else -1,
             "modified": lambda x: x["updated"] or "",
         }
-
-        items = folders_data + objects
-        items.sort(
+        selected_items.sort(
             key=key_map.get(sort, key_map["name"]),
             reverse=direction.lower() == "desc",
         )
+
+        total_items = len(selected_items)
+        total_pages = max(1, (total_items + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        start = (page - 1) * page_size
+        page_items = selected_items[start:start + page_size]
+        folders_data = [item for item in page_items if item["is_folder"]]
+        objects_data = [item for item in page_items if not item["is_folder"]]
 
         return {
             "storage_id": storage_id,
@@ -324,9 +325,15 @@ class GCSService:
             "prefix": prefix,
             "parent_prefix": self._parent_prefix(storage_id, bucket, prefix),
             "folders": folders_data,
-            "objects": objects,
-            "items": items,
-            "count": len(items),
+            "objects": objects_data,
+            "items": page_items,
+            "count": len(page_items),
+            "total_items": total_items,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "has_previous": page > 1,
+            "has_next": page < total_pages,
         }
 
     def search(self, storage_id, bucket, q, prefix=""):

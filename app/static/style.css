@@ -671,3 +671,49 @@ button {
     }
 
 }
+
+
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12px;
+}
+
+.pagination-bar button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.page-number-input {
+    width: 76px;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--input-bg);
+    color: var(--text);
+}
+
+
+.version-tag {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    vertical-align: middle;
+}
+
+:root[data-theme="dark"] .page-number-input,
+:root[data-theme="premium"] .page-number-input {
+    background: var(--input-bg);
+    color: var(--text);
+    border-color: var(--border);
+    color-scheme: dark;
+}

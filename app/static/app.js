@@ -11,6 +11,10 @@ const state = {
     selected: null,
     sort: "name",
     direction: "asc",
+    page: 1,
+    pageSize: 500,
+    hasNextPage: false,
+    totalPages: 1,
 
     // Persistent tree state.
     // Each key is a folder prefix and stores its children plus expansion state.
@@ -74,17 +78,23 @@ function bindEvents() {
     });
 
     document.getElementById("backButton").addEventListener("click", goBack);
+    document.getElementById("pagePrevious").addEventListener("click", () => goToPage(state.page - 1));
+    document.getElementById("pageNext").addEventListener("click", () => goToPage(state.page + 1));
+    document.getElementById("pageGo").addEventListener("click", () => goToPage(document.getElementById("pageNumber").value));
+    document.getElementById("pageNumber").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") goToPage(event.target.value);
+    });
 
     document.getElementById("sortSelect").addEventListener("change", async (event) => {
         state.sort = event.target.value;
-        await loadFolder(state.prefix, false);
+        await loadFolder(state.prefix, false, 1);
     });
 
     document.getElementById("directionButton").addEventListener("click", async () => {
         state.direction = state.direction === "asc" ? "desc" : "asc";
         document.getElementById("directionButton").textContent =
             state.direction === "asc" ? "↑" : "↓";
-        await loadFolder(state.prefix, false);
+        await loadFolder(state.prefix, false, 1);
     });
 
     document.getElementById("globalSearch").addEventListener("keydown", async (event) => {
@@ -248,7 +258,7 @@ function normalizePrefix(prefix) {
     return prefix;
 }
 
-async function loadFolder(prefix = "", pushHistory = true) {
+async function loadFolder(prefix = "", pushHistory = true, page = 1) {
     prefix = normalizePrefix(prefix);
 
     if (pushHistory && prefix !== state.prefix) {
@@ -261,6 +271,8 @@ async function loadFolder(prefix = "", pushHistory = true) {
         prefix,
         sort: state.sort,
         direction: state.direction,
+        page: String(page),
+        page_size: String(state.pageSize),
     });
 
     const response = await fetch(`/api/objects?${params.toString()}`);
@@ -272,6 +284,9 @@ async function loadFolder(prefix = "", pushHistory = true) {
     const data = await response.json();
 
     state.prefix = data.prefix || prefix;
+    state.page = data.page || page;
+    state.hasNextPage = Boolean(data.has_next);
+    state.totalPages = Math.max(1, Number(data.total_pages) || 1);
     state.items = data.items || [];
     state.selected = null;
 
@@ -284,6 +299,7 @@ async function loadFolder(prefix = "", pushHistory = true) {
     renderBreadcrumb();
     renderTree();
     renderFiles();
+    renderPagination();
     clearSelection();
 
     document.getElementById("backButton").disabled =
@@ -303,6 +319,10 @@ async function loadTreeChildren(prefix) {
         prefix,
         sort: "name",
         direction: "asc",
+    page: 1,
+    pageSize: 500,
+    hasNextPage: false,
+    totalPages: 1,
     });
 
     const response = await fetch(`/api/objects?${params.toString()}`);
@@ -568,6 +588,34 @@ function treeNodeMatchesFilter(node, filterText) {
     return children.some(child => treeNodeMatchesFilter(child, filterText));
 }
 
+
+function renderPagination() {
+    const previous = document.getElementById("pagePrevious");
+    const next = document.getElementById("pageNext");
+    const input = document.getElementById("pageNumber");
+    const label = document.getElementById("pageLabel");
+    if (!previous || !next || !input || !label) return;
+    previous.disabled = state.page <= 1;
+    next.disabled = !state.hasNextPage;
+    input.value = String(state.page);
+    input.max = String(state.totalPages);
+    label.textContent = `Página ${state.page} de ${state.totalPages}`;
+}
+
+async function goToPage(page) {
+    const target = Number.parseInt(page, 10);
+    if (!Number.isFinite(target) || target < 1 || target > state.totalPages || target === state.page) {
+        renderPagination();
+        return;
+    }
+    try {
+        await loadFolder(state.prefix, false, target);
+    } catch (error) {
+        console.error(error);
+        alert(`No se pudo cargar la página ${target}: ${error.message}`);
+    }
+}
+
 function renderFiles() {
     const container = document.getElementById("filesTable");
     container.innerHTML = "";
@@ -575,7 +623,7 @@ function renderFiles() {
     const items = state.items || [];
 
     document.getElementById("itemCount").textContent =
-        `${items.length} elemento${items.length === 1 ? "" : "s"}`;
+        `${items.length} elemento${items.length === 1 ? "" : "s"} en esta página`;
 
     if (!items.length) {
         container.innerHTML = `

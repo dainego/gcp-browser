@@ -1,4 +1,4 @@
-# GCS Data Browser v0.8.4
+# GCS Data Browser v0.8.10
 
 Read-only browser for configured Google Cloud Storage buckets.
 
@@ -137,10 +137,30 @@ Por defecto, el servicio queda privado. Para habilitar acceso público explícit
 Las claves privadas nunca forman parte de la imagen ni del código fuente desplegado.
 
 
-## v0.8.6 — listado bajo demanda
+## v0.8.7 — listado bajo demanda
 
 - El navegador solicita únicamente los objetos y subcarpetas inmediatos del prefijo actual de Cloud Storage (`delimiter="/"`). Ya no recorre recursivamente todos los objetos descendientes al abrir una carpeta.
 - Las subcarpetas se consultan al expandirlas en el árbol de navegación.
 - Se corrigió la solicitud del árbol para enviar `storage_id` y `bucket` junto con el prefijo.
 
 Esto reduce considerablemente el consumo de memoria en buckets con muchos niveles y objetos. Una carpeta que contenga por sí sola miles de archivos todavía puede requerir paginación de resultados en una mejora posterior.
+
+
+## v0.8.7
+- Navegación de archivos paginada en bloques de hasta 500 elementos.
+- Controles de página anterior, siguiente e ingreso directo de número de página.
+- La API conserva en memoria únicamente los elementos de la página solicitada.
+
+
+## v0.8.8 — corrección de paginación
+
+- Corrige el acceso al token de continuación de Google Cloud Storage: se consulta en el iterador y no en el objeto `Page`.
+- Evita el error HTTP 400 al cargar carpetas.
+
+
+## v0.8.10 — paginación y tema
+
+- Corregido el cálculo de páginas y el estado de navegación anterior/siguiente.
+- El indicador muestra `Página actual de total`.
+- Se incorpora la versión en el título y el encabezado.
+- El campo de página respeta los fondos de los temas oscuro y premium.

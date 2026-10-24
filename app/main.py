@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .gcs_service import GCSService
 
-app = FastAPI(title="GCS Data Browser", version="0.8.6")
+app = FastAPI(title="GCS Data Browser", version="0.8.9")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 gcs = GCSService()
 
@@ -37,9 +37,10 @@ def bucket_config(storage_id: str, bucket: str):
 
 @app.get("/api/objects")
 def objects(storage_id: str, bucket: str, prefix: str = "",
-            sort: str = Query("name"), direction: str = Query("asc")):
+            sort: str = Query("name"), direction: str = Query("asc"),
+            page: int = Query(1, ge=1), page_size: int = Query(500, ge=1, le=500)):
     try:
-        return gcs.list_objects(storage_id, bucket, prefix, sort, direction)
+        return gcs.list_objects(storage_id, bucket, prefix, sort, direction, page, page_size)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
