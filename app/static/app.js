@@ -298,6 +298,8 @@ async function loadTreeChildren(prefix) {
     }
 
     const params = new URLSearchParams({
+        storage_id: state.storageId,
+        bucket: state.bucket,
         prefix,
         sort: "name",
         direction: "asc",

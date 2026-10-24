@@ -135,3 +135,12 @@ Por defecto, el servicio queda privado. Para habilitar acceso público explícit
 ```
 
 Las claves privadas nunca forman parte de la imagen ni del código fuente desplegado.
+
+
+## v0.8.6 — listado bajo demanda
+
+- El navegador solicita únicamente los objetos y subcarpetas inmediatos del prefijo actual de Cloud Storage (`delimiter="/"`). Ya no recorre recursivamente todos los objetos descendientes al abrir una carpeta.
+- Las subcarpetas se consultan al expandirlas en el árbol de navegación.
+- Se corrigió la solicitud del árbol para enviar `storage_id` y `bucket` junto con el prefijo.
+
+Esto reduce considerablemente el consumo de memoria en buckets con muchos niveles y objetos. Una carpeta que contenga por sí sola miles de archivos todavía puede requerir paginación de resultados en una mejora posterior.

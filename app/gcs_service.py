@@ -246,37 +246,52 @@ class GCSService:
         }
 
     def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc"):
+        """List only the immediate children of the requested GCS prefix.
+
+        The delimiter is critical: without it, Cloud Storage returns every object
+        recursively below the prefix, which can consume large amounts of memory
+        for buckets with deep or large directory-like structures.
+        """
         bucket = self._allowed_bucket(storage_id, bucket)
         prefix = self._normalize_prefix(storage_id, bucket, prefix)
 
-        blobs = list(
-            self._client(storage_id).list_blobs(
-                self._bucket(storage_id, bucket), prefix=prefix
-            )
+        iterator = self._client(storage_id).list_blobs(
+            self._bucket(storage_id, bucket),
+            prefix=prefix,
+            delimiter="/",
+            page_size=1000,
         )
 
         folders = {}
         objects = []
 
-        for blob in blobs:
-            if blob.name == prefix:
-                continue
-
-            relative = self._relative_name(blob.name, prefix)
-
-            if "/" in relative:
-                child = relative.split("/", 1)[0]
-                folder_name = f"{prefix}{child}/"
-                folders[folder_name] = {
-                    "name": folder_name.rstrip("/"),
-                    "relative_name": child,
+        # Iterate page by page. The delimiter causes GCS to return only direct
+        # objects plus child prefixes, instead of traversing all descendants.
+        for page in iterator.pages:
+            for child_prefix in (iterator.prefixes or set()):
+                if child_prefix == prefix:
+                    continue
+                relative = self._relative_name(child_prefix.rstrip("/"), prefix)
+                if not relative:
+                    continue
+                folders[child_prefix] = {
+                    "name": child_prefix.rstrip("/"),
+                    "relative_name": relative,
                     "is_folder": True,
                     "size": None,
                     "updated": None,
                     "content_type": None,
                     "storage_class": None,
                 }
-            else:
+
+            for blob in page:
+                if blob.name == prefix:
+                    continue
+                relative = self._relative_name(blob.name, prefix)
+                # Defensive guard: delimiter listing should only return direct
+                # children, but do not expose descendants if GCS returns one.
+                if "/" in relative:
+                    continue
                 objects.append({
                     "name": blob.name,
                     "relative_name": relative,
