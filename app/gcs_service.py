@@ -1,6 +1,9 @@
 
 import json
 import os
+import re
+import threading
+import time
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -15,6 +18,10 @@ class GCSService:
     def __init__(self):
         self.max_preview_rows = int(os.getenv("MAX_PREVIEW_ROWS", "100"))
         self.max_search_results = int(os.getenv("MAX_SEARCH_RESULTS", "200"))
+        self.count_cache_ttl_seconds = max(0, int(os.getenv("COUNT_CACHE_TTL_SECONDS", "300")))
+        self._count_cache = {}
+        self._count_cache_lock = threading.Lock()
+        self._count_inflight = {}
         self.storages = self._load_storages()
 
         if not self.storages:
@@ -245,61 +252,53 @@ class GCSService:
             "root_prefix": self._root_prefix(storage_id, bucket),
         }
 
-    def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc", page=1, page_size=500):
-        """Return a page of the immediate children of a folder.
-
-        The delimiter keeps the query scoped to immediate children. We build a
-        single, consistently sorted list of those children before slicing it;
-        this is important because a GCS API page counts blobs, while folders
-        are returned separately as iterator prefixes. Counting only GCS pages
-        caused the UI's page controls to appear not to work.
-        """
+    def list_objects(self, storage_id, bucket, prefix="", sort="name", direction="asc", page_token=None, page_size=500):
+        """Return one incremental batch of immediate children for a folder."""
         bucket = self._allowed_bucket(storage_id, bucket)
         prefix = self._normalize_prefix(storage_id, bucket, prefix)
-        page = max(1, int(page or 1))
-        page_size = min(500, max(1, int(page_size or 500)))
+        page_size = max(1, min(int(page_size or 500), 500))
 
         iterator = self._client(storage_id).list_blobs(
             self._bucket(storage_id, bucket),
             prefix=prefix,
             delimiter="/",
+            max_results=page_size,
+            page_token=page_token or None,
         )
-
-        # With delimiter="/", this collects only blobs directly inside this
-        # folder. Nested objects are represented by iterator.prefixes.
-        blobs = list(iterator)
+        page = next(iterator.pages, None)
         selected_items = []
 
-        for child_prefix in sorted(iterator.prefixes or set()):
-            if child_prefix == prefix:
-                continue
-            relative = self._relative_name(child_prefix.rstrip("/"), prefix)
-            if relative:
-                selected_items.append({
-                    "name": child_prefix.rstrip("/"),
-                    "relative_name": relative,
-                    "is_folder": True,
-                    "size": None,
-                    "updated": None,
-                    "content_type": None,
-                    "storage_class": None,
-                })
+        if page is not None:
+            for child_prefix in sorted(getattr(page, "prefixes", set()) or set()):
+                if child_prefix == prefix:
+                    continue
+                relative = self._relative_name(child_prefix.rstrip("/"), prefix)
+                if relative:
+                    selected_items.append({
+                        "name": child_prefix.rstrip("/"),
+                        "relative_name": relative,
+                        "is_folder": True,
+                        "size": None,
+                        "updated": None,
+                        "content_type": None,
+                        "storage_class": None,
+                    })
 
-        for blob in blobs:
-            if blob.name == prefix:
-                continue
-            relative = self._relative_name(blob.name, prefix)
-            if not relative or "/" in relative:
-                continue
-            selected_items.append({
-                "name": blob.name,
-                "relative_name": relative,
-                "size": blob.size or 0,
-                "updated": blob.updated.isoformat() if blob.updated else None,
-                "content_type": blob.content_type,
-                "storage_class": blob.storage_class,
-                "is_folder": False,
-            })
+            for blob in page:
+                if blob.name == prefix:
+                    continue
+                relative = self._relative_name(blob.name, prefix)
+                if not relative or "/" in relative:
+                    continue
+                selected_items.append({
+                    "name": blob.name,
+                    "relative_name": relative,
+                    "size": blob.size or 0,
+                    "updated": blob.updated.isoformat() if blob.updated else None,
+                    "content_type": blob.content_type,
+                    "storage_class": blob.storage_class,
+                    "is_folder": False,
+                })
 
         key_map = {
             "name": lambda x: x["relative_name"].lower(),
@@ -310,15 +309,9 @@ class GCSService:
             key=key_map.get(sort, key_map["name"]),
             reverse=direction.lower() == "desc",
         )
-
-        total_items = len(selected_items)
-        total_pages = max(1, (total_items + page_size - 1) // page_size)
-        page = min(page, total_pages)
-        start = (page - 1) * page_size
-        page_items = selected_items[start:start + page_size]
-        folders_data = [item for item in page_items if item["is_folder"]]
-        objects_data = [item for item in page_items if not item["is_folder"]]
-
+        next_page_token = iterator.next_page_token
+        folders_data = [item for item in selected_items if item["is_folder"]]
+        objects_data = [item for item in selected_items if not item["is_folder"]]
         return {
             "storage_id": storage_id,
             "bucket": bucket,
@@ -326,30 +319,100 @@ class GCSService:
             "parent_prefix": self._parent_prefix(storage_id, bucket, prefix),
             "folders": folders_data,
             "objects": objects_data,
-            "items": page_items,
-            "count": len(page_items),
-            "total_items": total_items,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "has_previous": page > 1,
-            "has_next": page < total_pages,
+            "items": selected_items,
+            "count": len(selected_items),
+            "next_page_token": next_page_token,
+            "has_more": bool(next_page_token),
+        }
+
+    def count_folder_items(self, storage_id, bucket, prefix=""):
+        """Return an exact immediate-child count, cached for a configurable TTL."""
+        bucket = self._allowed_bucket(storage_id, bucket)
+        prefix = self._normalize_prefix(storage_id, bucket, prefix)
+        key = (storage_id, bucket, prefix)
+
+        while True:
+            with self._count_cache_lock:
+                now = time.monotonic()
+                cached = self._count_cache.get(key)
+                if cached and now - cached[0] < self.count_cache_ttl_seconds:
+                    result = dict(cached[1])
+                    result["cached"] = True
+                    result["cache_ttl_seconds"] = self.count_cache_ttl_seconds
+                    return result
+
+                pending = self._count_inflight.get(key)
+                if pending is None:
+                    pending = threading.Event()
+                    self._count_inflight[key] = pending
+                    owner = True
+                else:
+                    owner = False
+
+            if owner:
+                break
+            # Avoid duplicate full listings when multiple requests count the same folder.
+            pending.wait()
+
+        try:
+            result = self._count_folder_items_uncached(storage_id, bucket, prefix)
+            with self._count_cache_lock:
+                if self.count_cache_ttl_seconds > 0:
+                    self._count_cache[key] = (time.monotonic(), dict(result))
+            result["cached"] = False
+            result["cache_ttl_seconds"] = self.count_cache_ttl_seconds
+            return result
+        finally:
+            with self._count_cache_lock:
+                event = self._count_inflight.pop(key, None)
+                if event:
+                    event.set()
+
+    def _count_folder_items_uncached(self, storage_id, bucket, prefix):
+        """Count immediate files and virtual folders without retaining all entries."""
+        iterator = self._client(storage_id).list_blobs(
+            self._bucket(storage_id, bucket), prefix=prefix, delimiter="/", max_results=1000
+        )
+        file_count = 0
+        folder_prefixes = set()
+        for page in iterator.pages:
+            folder_prefixes.update(getattr(page, "prefixes", set()) or set())
+            for blob in page:
+                if blob.name == prefix:
+                    continue
+                relative = self._relative_name(blob.name, prefix)
+                if relative and "/" not in relative:
+                    file_count += 1
+        folder_count = sum(1 for item in folder_prefixes if item != prefix)
+        return {
+            "storage_id": storage_id,
+            "bucket": bucket,
+            "prefix": prefix,
+            "files": file_count,
+            "folders": folder_count,
+            "count": file_count + folder_count,
         }
 
     def search(self, storage_id, bucket, q, prefix=""):
         bucket = self._allowed_bucket(storage_id, bucket)
-        q = (q or "").strip().lower()
+        q = (q or "").strip()
         prefix = self._normalize_prefix(storage_id, bucket, prefix)
         results = []
 
         if q:
+            try:
+                pattern = re.compile(q, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"Expresión regular inválida: {exc}") from exc
+
             for blob in self._client(storage_id).list_blobs(
                 self._bucket(storage_id, bucket), prefix=prefix
             ):
-                if q in blob.name.lower():
+                relative = self._relative_name(blob.name, prefix)
+                if pattern.search(relative):
                     results.append({
                         "name": blob.name,
-                        "relative_name": self._relative_name(blob.name, prefix),
+                        "relative_name": relative,
                         "size": blob.size or 0,
                         "updated": blob.updated.isoformat() if blob.updated else None,
                         "content_type": blob.content_type,
@@ -367,6 +430,8 @@ class GCSService:
             "prefix": prefix,
             "results": results,
             "count": len(results),
+            "max_results": self.max_search_results,
+            "truncated": len(results) >= self.max_search_results,
         }
 
     def object_metadata(self, storage_id, bucket, name):

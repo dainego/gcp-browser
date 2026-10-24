@@ -80,7 +80,9 @@ gcloud projects add-iam-policy-binding big-data-movistar `
 .\deploy\cloudrun\deploy-cloud-run.ps1 `
   -ProjectId $project_id `
   -Region us-east4 `
-  -RuntimeServiceAccount "gcpbrowser-cloudrun@$project_id.iam.gserviceaccount.com"
+  -RuntimeServiceAccount "gcpbrowser-cloudrun@$project_id.iam.gserviceaccount.com" `
+  -ImageTag "v0.8.15" `
+  -AllowUnauthenticated
 
 # Habilitar acceso público
 gcloud run services add-iam-policy-binding gcs-data-browser `

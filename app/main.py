@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .gcs_service import GCSService
 
-app = FastAPI(title="GCS Data Browser", version="0.8.11")
+app = FastAPI(title="GCS Data Browser", version="0.8.15")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 gcs = GCSService()
 
@@ -38,9 +38,18 @@ def bucket_config(storage_id: str, bucket: str):
 @app.get("/api/objects")
 def objects(storage_id: str, bucket: str, prefix: str = "",
             sort: str = Query("name"), direction: str = Query("asc"),
-            page: int = Query(1, ge=1), page_size: int = Query(500, ge=1, le=500)):
+            page_token: str = Query(""), page_size: int = Query(500, ge=1, le=500)):
     try:
-        return gcs.list_objects(storage_id, bucket, prefix, sort, direction, page, page_size)
+        return gcs.list_objects(storage_id, bucket, prefix, sort, direction,
+                                page_token=page_token, page_size=page_size)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/objects/count")
+def count_objects(storage_id: str, bucket: str, prefix: str = ""):
+    try:
+        return gcs.count_folder_items(storage_id, bucket, prefix)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

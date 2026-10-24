@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GCS Data Browser v0.8.11</title>
-    <link rel="stylesheet" href="/static/style.css?v=0.8.11">
+    <title>GCS Data Browser v0.8.15</title>
+    <link rel="stylesheet" href="/static/style.css?v=0.8.15">
 </head>
 <body>
 <div class="app-shell">
     <header class="topbar">
         <div>
-            <div class="brand">GCS Data Browser <span class="version-tag">v0.8.11</span></div>
+            <div class="brand">GCS Data Browser <span class="version-tag">v0.8.15</span></div>
             <div class="subtitle" id="bucketName">Cargando bucket...</div>
         </div>
 
@@ -19,7 +19,7 @@
                 id="globalSearch"
                 class="search-input"
                 type="search"
-                placeholder="Buscar objetos..."
+                placeholder="Buscar en todo el bucket (regex)..."
                 autocomplete="off"
             >
 
@@ -80,21 +80,18 @@
                 <div class="section-header">
                     <div>
                         <span class="section-title">Archivos</span>
-                        <span id="itemCount" class="muted"></span>
+                        <span id="itemCount" class="muted">Contando elementos...</span>
                     </div>
                     <span id="currentPath" class="path-label"></span>
                 </div>
+                <div class="directory-search-row">
+                    <input id="directorySearch" class="search-input" type="search"
+                           placeholder="Buscar en este directorio (regex)..." autocomplete="off">
+                    <button id="directorySearchButton" class="secondary-button">Buscar</button>
+                    <button id="directorySearchClear" class="secondary-button" title="Limpiar búsqueda">Limpiar</button>
+                </div>
 
                 <div id="filesTable" class="files-table"></div>
-                <div class="pagination-bar" aria-label="Paginación de archivos">
-                    <button id="pagePrevious" class="secondary-button" type="button">← Anterior</button>
-                    <span id="pageLabel" class="muted">Página 1 de 1</span>
-                    <label for="pageNumber">Ir a página</label>
-                    <input id="pageNumber" class="page-number-input" type="number" min="1" value="1" inputmode="numeric">
-                    <button id="pageGo" class="secondary-button" type="button">Ir</button>
-                    <button id="pageNext" class="secondary-button" type="button">Siguiente →</button>
-                    <span class="muted">500 elementos por página</span>
-                </div>
             </section>
 
             <section class="details-section">
@@ -133,6 +130,6 @@
     </div>
 </div>
 
-<script src="/static/app.js?v=0.8.11"></script>
+<script src="/static/app.js?v=0.8.15"></script>
 </body>
 </html>

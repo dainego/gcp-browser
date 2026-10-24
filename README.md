@@ -1,4 +1,4 @@
-# GCS Data Browser v0.8.11
+# GCS Data Browser v0.8.15
 
 Read-only browser for configured Google Cloud Storage buckets.
 
@@ -158,7 +158,7 @@ Esto reduce considerablemente el consumo de memoria en buckets con muchos nivele
 - Evita el error HTTP 400 al cargar carpetas.
 
 
-## v0.8.11 — indicador de procesamiento
+## v0.8.15 — indicador de procesamiento
 
 - Añade un indicador visual global mientras hay solicitudes activas al backend.
 - Evita parpadeos en operaciones rápidas y permanece visible mientras existan solicitudes concurrentes.
@@ -170,3 +170,21 @@ Esto reduce considerablemente el consumo de memoria en buckets con muchos nivele
 - El indicador muestra `Página actual de total`.
 - Se incorpora la versión en el título y el encabezado.
 - El campo de página respeta los fondos de los temas oscuro y premium.
+
+
+## v0.8.15 — sin paginación
+
+Se eliminaron los controles de paginación. La vista lista todos los archivos y carpetas del nivel actual; el contenido de subcarpetas se consulta al navegar hacia ellas.
+
+
+## v0.8.15
+- Carga incremental automática de los elementos de cada directorio en bloques de hasta 500, al desplazarse hacia el final de la lista.
+- La interfaz mantiene la navegación por carpetas y el indicador de procesamiento, sin controles de paginación visibles.
+
+
+## v0.8.15 — conteo de directorios con caché
+
+- El conteo exacto de archivos y subcarpetas se ejecuta en segundo plano desde la interfaz.
+- Los resultados se guardan en caché durante 5 minutos por almacenamiento, bucket y prefijo.
+- Las solicitudes simultáneas al mismo directorio comparten el mismo conteo en curso para evitar recorridos duplicados.
+- El TTL se configura con `COUNT_CACHE_TTL_SECONDS` (por defecto `300`; `0` desactiva la caché).

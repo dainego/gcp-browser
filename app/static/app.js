@@ -48,13 +48,14 @@ const state = {
     rootPrefix: "",
     history: [],
     items: [],
+    nextPageToken: null,
+    hasMoreItems: false,
+    loadingMoreItems: false,
+    folderRequestId: 0,
     selected: null,
     sort: "name",
     direction: "asc",
-    page: 1,
-    pageSize: 500,
-    hasNextPage: false,
-    totalPages: 1,
+    searchMode: null,
 
     // Persistent tree state.
     // Each key is a folder prefix and stores its children plus expansion state.
@@ -104,6 +105,12 @@ function applyTheme(theme) {
 }
 
 function bindEvents() {
+    const filesContainer = document.getElementById("filesTable");
+    filesContainer.addEventListener("scroll", () => {
+        if (filesContainer.scrollTop + filesContainer.clientHeight >= filesContainer.scrollHeight - 220) {
+            loadMoreItems();
+        }
+    });
     document.getElementById("storageSelect").addEventListener("change", async (event) => {
         await switchStorage(event.target.value);
     });
@@ -118,29 +125,31 @@ function bindEvents() {
     });
 
     document.getElementById("backButton").addEventListener("click", goBack);
-    document.getElementById("pagePrevious").addEventListener("click", () => goToPage(state.page - 1));
-    document.getElementById("pageNext").addEventListener("click", () => goToPage(state.page + 1));
-    document.getElementById("pageGo").addEventListener("click", () => goToPage(document.getElementById("pageNumber").value));
-    document.getElementById("pageNumber").addEventListener("keydown", (event) => {
-        if (event.key === "Enter") goToPage(event.target.value);
-    });
-
     document.getElementById("sortSelect").addEventListener("change", async (event) => {
         state.sort = event.target.value;
-        await loadFolder(state.prefix, false, 1);
+        await loadFolder(state.prefix, false);
     });
 
     document.getElementById("directionButton").addEventListener("click", async () => {
         state.direction = state.direction === "asc" ? "desc" : "asc";
         document.getElementById("directionButton").textContent =
             state.direction === "asc" ? "↑" : "↓";
-        await loadFolder(state.prefix, false, 1);
+        await loadFolder(state.prefix, false);
     });
 
     document.getElementById("globalSearch").addEventListener("keydown", async (event) => {
-        if (event.key === "Enter") {
-            await globalSearch(event.target.value);
-        }
+        if (event.key === "Enter") await globalSearch(event.target.value);
+    });
+    document.getElementById("directorySearch").addEventListener("keydown", async (event) => {
+        if (event.key === "Enter") await directorySearch(event.target.value);
+    });
+    document.getElementById("directorySearchButton").addEventListener("click", async () => {
+        await directorySearch(document.getElementById("directorySearch").value);
+    });
+    document.getElementById("directorySearchClear").addEventListener("click", async () => {
+        document.getElementById("directorySearch").value = "";
+        state.searchMode = null;
+        await loadFolder(state.prefix, false);
     });
 
     document.getElementById("folderSearch").addEventListener("input", (event) => {
@@ -298,8 +307,9 @@ function normalizePrefix(prefix) {
     return prefix;
 }
 
-async function loadFolder(prefix = "", pushHistory = true, page = 1) {
+async function loadFolder(prefix = "", pushHistory = true) {
     prefix = normalizePrefix(prefix);
+    state.searchMode = null;
 
     if (pushHistory && prefix !== state.prefix) {
         state.history.push(state.prefix);
@@ -311,10 +321,13 @@ async function loadFolder(prefix = "", pushHistory = true, page = 1) {
         prefix,
         sort: state.sort,
         direction: state.direction,
-        page: String(page),
-        page_size: String(state.pageSize),
     });
 
+    const requestId = ++state.folderRequestId;
+    state.nextPageToken = null;
+    state.hasMoreItems = false;
+    state.loadingMoreItems = false;
+    params.set("page_size", "500");
     const response = await fetch(`/api/objects?${params.toString()}`);
 
     if (!response.ok) {
@@ -322,12 +335,12 @@ async function loadFolder(prefix = "", pushHistory = true, page = 1) {
     }
 
     const data = await response.json();
+    if (requestId !== state.folderRequestId) return;
 
     state.prefix = data.prefix || prefix;
-    state.page = data.page || page;
-    state.hasNextPage = Boolean(data.has_next);
-    state.totalPages = Math.max(1, Number(data.total_pages) || 1);
     state.items = data.items || [];
+    state.nextPageToken = data.next_page_token || null;
+    state.hasMoreItems = Boolean(data.has_more && state.nextPageToken);
     state.selected = null;
 
     // Cache the folder's immediate children for the tree.
@@ -339,11 +352,62 @@ async function loadFolder(prefix = "", pushHistory = true, page = 1) {
     renderBreadcrumb();
     renderTree();
     renderFiles();
-    renderPagination();
     clearSelection();
 
     document.getElementById("backButton").disabled =
         !state.prefix || state.prefix === state.rootPrefix;
+
+    const countLabel = document.getElementById("itemCount");
+    countLabel.textContent = "Contando elementos del directorio…";
+    fetch(`/api/objects/count?${new URLSearchParams({storage_id: state.storageId, bucket: state.bucket, prefix: state.prefix})}`)
+        .then(async response => {
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+            if (requestId !== state.folderRequestId) return;
+            countLabel.textContent = `${result.count.toLocaleString()} elementos (${result.files.toLocaleString()} archivos, ${result.folders.toLocaleString()} carpetas)`;
+        })
+        .catch(error => {
+            if (requestId === state.folderRequestId) countLabel.textContent = `Elementos cargados: ${state.items.length}`;
+            console.warn("No se pudo contar el directorio:", error);
+        });
+}
+
+async function loadMoreItems() {
+    if (!state.hasMoreItems || state.loadingMoreItems || !state.nextPageToken) return;
+    state.loadingMoreItems = true;
+    const requestId = state.folderRequestId;
+    try {
+        const params = new URLSearchParams({
+            storage_id: state.storageId,
+            bucket: state.bucket,
+            prefix: state.prefix,
+            sort: state.sort,
+            direction: state.direction,
+            page_size: "500",
+            page_token: state.nextPageToken,
+        });
+        const response = await fetch(`/api/objects?${params.toString()}`);
+        if (!response.ok) throw new Error(`Error cargando más elementos: HTTP ${response.status}`);
+        const data = await response.json();
+        if (requestId !== state.folderRequestId) return;
+
+        const existing = new Set(state.items.map(item => `${item.is_folder ? "d" : "f"}:${item.name}`));
+        for (const item of (data.items || [])) {
+            const key = `${item.is_folder ? "d" : "f"}:${item.name}`;
+            if (!existing.has(key)) state.items.push(item);
+        }
+        state.nextPageToken = data.next_page_token || null;
+        state.hasMoreItems = Boolean(data.has_more && state.nextPageToken);
+        cacheTreeFolder(state.prefix, state.items.filter(item => item.is_folder));
+        renderTree();
+        renderFiles();
+    } catch (error) {
+        console.error(error);
+        const count = document.getElementById("itemCount");
+        count.title = error.message || "No se pudieron cargar más elementos";
+    } finally {
+        state.loadingMoreItems = false;
+    }
 }
 
 async function loadTreeChildren(prefix) {
@@ -359,10 +423,7 @@ async function loadTreeChildren(prefix) {
         prefix,
         sort: "name",
         direction: "asc",
-    page: 1,
-    pageSize: 500,
-    hasNextPage: false,
-    totalPages: 1,
+    searchMode: null,
     });
 
     const response = await fetch(`/api/objects?${params.toString()}`);
@@ -629,41 +690,17 @@ function treeNodeMatchesFilter(node, filterText) {
 }
 
 
-function renderPagination() {
-    const previous = document.getElementById("pagePrevious");
-    const next = document.getElementById("pageNext");
-    const input = document.getElementById("pageNumber");
-    const label = document.getElementById("pageLabel");
-    if (!previous || !next || !input || !label) return;
-    previous.disabled = state.page <= 1;
-    next.disabled = !state.hasNextPage;
-    input.value = String(state.page);
-    input.max = String(state.totalPages);
-    label.textContent = `Página ${state.page} de ${state.totalPages}`;
-}
-
-async function goToPage(page) {
-    const target = Number.parseInt(page, 10);
-    if (!Number.isFinite(target) || target < 1 || target > state.totalPages || target === state.page) {
-        renderPagination();
-        return;
-    }
-    try {
-        await loadFolder(state.prefix, false, target);
-    } catch (error) {
-        console.error(error);
-        alert(`No se pudo cargar la página ${target}: ${error.message}`);
-    }
-}
-
 function renderFiles() {
     const container = document.getElementById("filesTable");
     container.innerHTML = "";
 
     const items = state.items || [];
 
-    document.getElementById("itemCount").textContent =
-        `${items.length} elemento${items.length === 1 ? "" : "s"} en esta página`;
+    if (state.searchMode) {
+        document.getElementById("itemCount").textContent = `${items.length} resultado${items.length === 1 ? "" : "s"}`;
+    } else if (state.hasMoreItems) {
+        document.getElementById("itemCount").textContent = `${items.length} elementos cargados · desplazate para cargar más`;
+    }
 
     if (!items.length) {
         container.innerHTML = `
@@ -710,6 +747,18 @@ function renderFiles() {
 
         container.appendChild(row);
     });
+
+    if (state.hasMoreItems) {
+        const hint = document.createElement("div");
+        hint.className = "load-more-hint";
+        hint.textContent = state.loadingMoreItems ? "Cargando más elementos…" : "Desplazate hacia abajo para cargar los próximos 500 elementos";
+        container.appendChild(hint);
+    } else if (items.length) {
+        const hint = document.createElement("div");
+        hint.className = "load-more-hint";
+        hint.textContent = "Fin del directorio";
+        container.appendChild(hint);
+    }
 }
 
 async function selectFile(item) {
@@ -851,29 +900,44 @@ async function renderPreview() {
     }
 }
 
-async function globalSearch(query) {
+async function runRegexSearch(query, prefix, mode) {
     query = (query || "").trim();
-
     if (!query) {
+        state.searchMode = null;
         await loadFolder(state.prefix, false);
         return;
     }
-
-    const response = await fetch(
-        `/api/search?storage_id=${encodeURIComponent(state.storageId)}&bucket=${encodeURIComponent(state.bucket)}&q=${encodeURIComponent(query)}&prefix=${encodeURIComponent(state.prefix)}`
-    );
-
-    if (!response.ok) {
-        throw new Error(`Error en búsqueda: HTTP ${response.status}`);
-    }
-
+    const params = new URLSearchParams({
+        storage_id: state.storageId,
+        bucket: state.bucket,
+        q: query,
+        prefix: prefix || "",
+    });
+    const response = await fetch(`/api/search?${params.toString()}`);
     const data = await response.json();
-
+    if (!response.ok) {
+        const message = data.detail || `Error en búsqueda: HTTP ${response.status}`;
+        document.getElementById("itemCount").textContent = message;
+        throw new Error(message);
+    }
+    state.searchMode = mode;
     state.items = data.results || [];
+    state.nextPageToken = null;
+    state.hasMoreItems = false;
     state.selected = null;
-
     renderFiles();
+    document.getElementById("itemCount").textContent = `${data.count} resultados${data.truncated ? ` (límite de ${data.max_results}; refiná la expresión)` : ""}`;
     clearSelection();
+}
+
+async function globalSearch(query) {
+    // La búsqueda general recorre el bucket desde el prefijo raíz configurado.
+    return runRegexSearch(query, state.rootPrefix, "global");
+}
+
+async function directorySearch(query) {
+    // La búsqueda del directorio incluye sus subdirectorios.
+    return runRegexSearch(query, state.prefix, "directory");
 }
 
 async function goBack() {
