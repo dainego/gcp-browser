@@ -370,8 +370,11 @@ class GCSService:
 
     def _count_folder_items_uncached(self, storage_id, bucket, prefix):
         """Count immediate files and virtual folders without retaining all entries."""
+        # Do not set max_results here: that parameter caps the TOTAL number of
+        # objects returned by the iterator. Omitting it lets iterator.pages
+        # traverse every API page, while each API request remains paginated.
         iterator = self._client(storage_id).list_blobs(
-            self._bucket(storage_id, bucket), prefix=prefix, delimiter="/", max_results=1000
+            self._bucket(storage_id, bucket), prefix=prefix, delimiter="/"
         )
         file_count = 0
         folder_prefixes = set()

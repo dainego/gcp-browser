@@ -315,6 +315,10 @@ async function loadFolder(prefix = "", pushHistory = true) {
         state.history.push(state.prefix);
     }
 
+    const requestId = ++state.folderRequestId;
+    const countLabel = document.getElementById("itemCount");
+    countLabel.textContent = "Total de elementos: calculando...";
+
     const params = new URLSearchParams({
         storage_id: state.storageId,
         bucket: state.bucket,
@@ -323,7 +327,6 @@ async function loadFolder(prefix = "", pushHistory = true) {
         direction: state.direction,
     });
 
-    const requestId = ++state.folderRequestId;
     state.nextPageToken = null;
     state.hasMoreItems = false;
     state.loadingMoreItems = false;
@@ -357,17 +360,18 @@ async function loadFolder(prefix = "", pushHistory = true) {
     document.getElementById("backButton").disabled =
         !state.prefix || state.prefix === state.rootPrefix;
 
-    const countLabel = document.getElementById("itemCount");
-    countLabel.textContent = "Contando elementos del directorio…";
     fetch(`/api/objects/count?${new URLSearchParams({storage_id: state.storageId, bucket: state.bucket, prefix: state.prefix})}`)
         .then(async response => {
             const result = await response.json();
             if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
-            if (requestId !== state.folderRequestId) return;
-            countLabel.textContent = `${result.count.toLocaleString()} elementos (${result.files.toLocaleString()} archivos, ${result.folders.toLocaleString()} carpetas)`;
+            if (requestId !== state.folderRequestId || state.searchMode !== null) return;
+            countLabel.textContent = `Total de elementos: ${result.count.toLocaleString()} (${result.files.toLocaleString()} archivos, ${result.folders.toLocaleString()} carpetas)`;
         })
         .catch(error => {
-            if (requestId === state.folderRequestId) countLabel.textContent = `Elementos cargados: ${state.items.length}`;
+            if (requestId === state.folderRequestId && state.searchMode === null) {
+                countLabel.textContent = "Total de elementos: no disponible";
+                countLabel.title = error.message || "No se pudo contar el directorio";
+            }
             console.warn("No se pudo contar el directorio:", error);
         });
 }
@@ -698,8 +702,6 @@ function renderFiles() {
 
     if (state.searchMode) {
         document.getElementById("itemCount").textContent = `${items.length} resultado${items.length === 1 ? "" : "s"}`;
-    } else if (state.hasMoreItems) {
-        document.getElementById("itemCount").textContent = `${items.length} elementos cargados · desplazate para cargar más`;
     }
 
     if (!items.length) {

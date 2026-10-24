@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .gcs_service import GCSService
 
-app = FastAPI(title="GCS Data Browser", version="0.8.15")
+app = FastAPI(title="GCS Data Browser", version="0.8.17")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 gcs = GCSService()
 

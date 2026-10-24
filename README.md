@@ -1,4 +1,18 @@
-# GCS Data Browser v0.8.15
+# GCS Data Browser v0.8.17
+
+## v0.8.17 — conteo completo de directorios
+
+Se eliminó `max_results=1000` del recorrido de conteo. Ese parámetro limitaba el total a 1.000 objetos, aunque el iterador tuviera más páginas. El conteo ahora recorre todas las páginas de Cloud Storage y acumula el número de archivos y prefijos de carpetas sin guardar todos los objetos en memoria.
+
+
+## v0.8.16 — mostrar estado del conteo de directorio
+
+- Muestra `Total de elementos: calculando...` desde el inicio de la navegación a una carpeta.
+- Mantiene la leyenda durante la carga incremental de bloques de archivos.
+- Al finalizar, muestra el total de archivos y subcarpetas directos.
+- Evita que una respuesta de conteo tardía sobrescriba el contador de resultados de una búsqueda.
+- Si falla el conteo, muestra `Total de elementos: no disponible` y deja el detalle del error en el atributo de ayuda.
+
 
 Read-only browser for configured Google Cloud Storage buckets.
 
@@ -158,7 +172,7 @@ Esto reduce considerablemente el consumo de memoria en buckets con muchos nivele
 - Evita el error HTTP 400 al cargar carpetas.
 
 
-## v0.8.15 — indicador de procesamiento
+## v0.8.11 — indicador de procesamiento
 
 - Añade un indicador visual global mientras hay solicitudes activas al backend.
 - Evita parpadeos en operaciones rápidas y permanece visible mientras existan solicitudes concurrentes.
@@ -172,12 +186,12 @@ Esto reduce considerablemente el consumo de memoria en buckets con muchos nivele
 - El campo de página respeta los fondos de los temas oscuro y premium.
 
 
-## v0.8.15 — sin paginación
+## v0.8.12 — sin paginación
 
 Se eliminaron los controles de paginación. La vista lista todos los archivos y carpetas del nivel actual; el contenido de subcarpetas se consulta al navegar hacia ellas.
 
 
-## v0.8.15
+## v0.8.13
 - Carga incremental automática de los elementos de cada directorio en bloques de hasta 500, al desplazarse hacia el final de la lista.
 - La interfaz mantiene la navegación por carpetas y el indicador de procesamiento, sin controles de paginación visibles.
 
