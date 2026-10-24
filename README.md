@@ -1,4 +1,4 @@
-# GCS Data Browser v0.8.10
+# GCS Data Browser v0.8.11
 
 Read-only browser for configured Google Cloud Storage buckets.
 
@@ -157,6 +157,12 @@ Esto reduce considerablemente el consumo de memoria en buckets con muchos nivele
 - Corrige el acceso al token de continuación de Google Cloud Storage: se consulta en el iterador y no en el objeto `Page`.
 - Evita el error HTTP 400 al cargar carpetas.
 
+
+## v0.8.11 — indicador de procesamiento
+
+- Añade un indicador visual global mientras hay solicitudes activas al backend.
+- Evita parpadeos en operaciones rápidas y permanece visible mientras existan solicitudes concurrentes.
+- Respeta el tema visual activo (claro, oscuro o premium).
 
 ## v0.8.10 — paginación y tema
 

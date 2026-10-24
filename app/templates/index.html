@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GCS Data Browser v0.8.10</title>
-    <link rel="stylesheet" href="/static/style.css?v=0.8.10">
+    <title>GCS Data Browser v0.8.11</title>
+    <link rel="stylesheet" href="/static/style.css?v=0.8.11">
 </head>
 <body>
 <div class="app-shell">
     <header class="topbar">
         <div>
-            <div class="brand">GCS Data Browser <span class="version-tag">v0.8.10</span></div>
+            <div class="brand">GCS Data Browser <span class="version-tag">v0.8.11</span></div>
             <div class="subtitle" id="bucketName">Cargando bucket...</div>
         </div>
 
@@ -125,6 +125,14 @@
     </main>
 </div>
 
-<script src="/static/app.js?v=0.8.10"></script>
+<div id="processingOverlay" class="processing-overlay hidden" role="status" aria-live="polite" aria-hidden="true">
+    <div class="processing-card">
+        <div class="processing-spinner" aria-hidden="true"></div>
+        <div class="processing-title">Procesando...</div>
+        <div class="processing-message">Esperá mientras se completa la operación</div>
+    </div>
+</div>
+
+<script src="/static/app.js?v=0.8.11"></script>
 </body>
 </html>

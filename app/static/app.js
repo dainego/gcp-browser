@@ -1,3 +1,43 @@
+// Indicador global para operaciones que realizan solicitudes al backend.
+(() => {
+    const nativeFetch = window.fetch.bind(window);
+    let activeRequests = 0;
+    let showTimer = null;
+
+    function showProcessing() {
+        const overlay = document.getElementById("processingOverlay");
+        if (!overlay) return;
+        overlay.classList.remove("hidden");
+        overlay.setAttribute("aria-hidden", "false");
+    }
+
+    function hideProcessing() {
+        const overlay = document.getElementById("processingOverlay");
+        if (!overlay) return;
+        overlay.classList.add("hidden");
+        overlay.setAttribute("aria-hidden", "true");
+    }
+
+    window.fetch = async (...args) => {
+        activeRequests += 1;
+        if (activeRequests === 1) {
+            showTimer = window.setTimeout(showProcessing, 180);
+        }
+        try {
+            return await nativeFetch(...args);
+        } finally {
+            activeRequests = Math.max(0, activeRequests - 1);
+            if (activeRequests === 0) {
+                if (showTimer !== null) {
+                    window.clearTimeout(showTimer);
+                    showTimer = null;
+                }
+                hideProcessing();
+            }
+        }
+    };
+})();
+
 const state = {
     storageId: "",
     storageLabel: "",
